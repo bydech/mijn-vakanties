@@ -1,0 +1,28 @@
+{
+  "name": "code",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "db:push": "npx supabase db query --linked --file supabase/schema.sql",
+    "db:types": "npx supabase gen types typescript --linked > app/types/database.types.ts"
+  },
+  "dependencies": {
+    "@nuxt/ui": "^4.12.0",
+    "@nuxtjs/supabase": "^2.1.0",
+    "@pinia/nuxt": "^1.0.3",
+    "@vite-pwa/nuxt": "^1.1.1",
+    "nuxt": "^4.6.2",
+    "sass-embedded": "^1.106.0",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "supabase": "^2.121.0"
+  }
+}
