@@ -12,41 +12,37 @@
   const toast = useToast()
   const loading = ref(false)
 
-  watch(
-    user,
-    (newUser) => {
-      if (newUser) {
-        navigateTo('/overzicht')
-      }
-    },
-    { immediate: true }
-  )
-
   const fields: AuthFormField[] = [
     {
       name: 'email',
       type: 'email',
-      label: 'Email',
-      placeholder: 'Enter your email',
+      label: 'E-mailadres',
+      placeholder: 'Voer je e-mailadres in',
       required: true
     },
     {
       name: 'password',
-      label: 'Password',
+      label: 'Wachtwoord',
       type: 'password',
-      placeholder: 'Enter your password',
+      placeholder: 'Voer je wachtwoord in',
       required: true
     },
     {
       name: 'remember',
-      label: 'Remember me',
+      label: 'Onthoud mij',
       type: 'checkbox'
     }
   ]
 
+  // Nederlands geconfigureerd validatieschema
   const schema = z.object({
-    email: z.string().email('Invalid email address'),
-    password: z.string().min(6, 'Must be at least 6 characters')
+    email: z
+      .email('Voer een geldig e-mailadres in')
+      .min(1, 'Vul een e-mailadres in'),
+    password: z
+      .string('Vul een wachtwoord in')
+      .min(1, 'Vul een wachtwoord in')
+      .min(6, 'Wachtwoord moet minimaal 6 tekens lang zijn')
   })
 
   type Schema = z.output<typeof schema>
@@ -61,7 +57,7 @@
 
       if (error) {
         toast.add({
-          title: 'Login Failed',
+          title: 'Inloggen mislukt',
           description: error.message,
           color: 'error'
         })
@@ -69,28 +65,40 @@
       }
 
       toast.add({
-        title: 'Success',
-        description: `Welcome back, ${data.user?.email}!`,
+        title: 'Succesvol ingelogd',
+        description: `Welkom terug, ${data.user?.email}!`,
         color: 'success'
       })
 
+      await navigateTo('/reizen')
+
     } catch (err: any) {
       toast.add({
-        title: 'Error',
-        description: err.message || 'Something went wrong',
+        title: 'Foutmelding',
+        description: err.message || 'Er is iets misgegaan',
         color: 'error'
       })
     } finally {
       loading.value = false
     }
   }
+
+  watch(
+    user,
+    (newUser) => {
+      if (newUser) {
+        navigateTo('/overzicht')
+      }
+    },
+    { immediate: true }
+  )
 </script>
 
 <template>
   <div class="flex min-h-screen items-center justify-center p-4">
     <UPageCard class="w-full max-w-md">
-      <UAuthForm :schema="schema" :fields="fields" :loading="loading" title="Login"
-        description="Enter your credentials to access your account." icon="i-lucide-user" @submit="onSubmit" />
+      <UAuthForm :schema="schema" :fields="fields" :loading="loading" :submit="{ label: 'Inloggen' }" title="Inloggen"
+        description="Voer je gegevens in om toegang te krijgen" icon="i-lucide-user" @submit="onSubmit" />
       <div class="text-center text-sm text-neutral-500 mt-4">
         Nog geen account?
         <NuxtLink to="/register" class="text-primary font-medium hover:underline">
@@ -98,7 +106,5 @@
         </NuxtLink>
       </div>
     </UPageCard>
-
   </div>
-
 </template>

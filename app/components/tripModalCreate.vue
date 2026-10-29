@@ -1,139 +1,117 @@
-<!-- components/ExpenseModalCreate.vue -->
+<!-- components/TripModalCreate.vue -->
 <script setup lang="ts">
   import type { FormSubmitEvent } from '@nuxt/ui'
-  import { useReceiptAttachment } from '~/composables/useReceiptAttachments';
 
   const isOpen = defineModel<boolean>('open', { default: false })
-  const props = defineProps<{
-    tripId: string
-    currency?: string
+
+  const emit = defineEmits<{
+    (e: 'created', id: string): void
   }>()
 
-  const expenseStore = useExpenseStore()
+  const tripStore = useTripStore()
+  const { compressImage, uploadThumbnail } = useTripThumbnail()
   const toast = useToast()
-  const { uploadReceipt, compressImage, isUploading } = useReceiptAttachment()
-  const isSubmitting = ref(false)
 
-  const selectedFile = ref<File | null>(null)
-  const previewUrl = ref<string | null>(null)
-  const sizeInfo = ref<{ original: string; compressed: string } | null>(null)
+  const isSubmitting = ref(false)
+  const isCompressing = ref(false)
+  const fileInputRef = ref<HTMLInputElement | null>(null)
+  const thumbnailFile = ref<File | null>(null)
+  const thumbnailPreviewUrl = ref<string | null>(null)
 
   const state = reactive({
-    title: '',
-    amount: 0,
-    date: new Date().toISOString().split('T')[0],
-    paid_by_member_id: '',
-    category: 'Eten & Drinken',
-    is_income: false,
-    notes: ''
+    name: '',
+    destination: '',
+    start_date: '',
+    end_date: '',
+    budget: 0,
+    currency: 'EUR'
   })
 
-  const categories = [
-    'Eten & Drinken',
-    'Boodschappen',
-    'Vervoer',
-    'Verblijf',
-    'Activiteiten',
-    'Winkelen',
-    'Overig'
+  const currencyOptions = [
+    { label: 'EUR (€)', value: 'EUR' },
+    { label: 'USD ($)', value: 'USD' },
+    { label: 'GBP (£)', value: 'GBP' },
+    { label: 'JPY (¥)', value: 'JPY' }
   ]
 
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
+  function triggerFileInput() {
+    fileInputRef.value?.click()
   }
 
-  async function onFileSelected(event: Event) {
-    const file = (event.target as HTMLInputElement)?.files?.[0]
-    if (file) {
-      selectedFile.value = file
-      previewUrl.value = URL.createObjectURL(file)
-
-      const compressed = await compressImage(file)
-      sizeInfo.value = {
-        original: formatBytes(file.size),
-        compressed: formatBytes(compressed.size)
+  async function handleThumbnailSelect(event: Event) {
+    const target = event.target as HTMLInputElement
+    if (target.files && target.files[0]) {
+      const rawFile = target.files[0]
+      isCompressing.value = true
+      try {
+        const compressed = await compressImage(rawFile, 1000, 600, 0.4)
+        thumbnailFile.value = compressed
+        thumbnailPreviewUrl.value = URL.createObjectURL(compressed)
+      } finally {
+        isCompressing.value = false
       }
     }
   }
 
-  function clearReceipt() {
-    selectedFile.value = null
-    previewUrl.value = null
-    sizeInfo.value = null
+  function removeThumbnail() {
+    thumbnailFile.value = null
+    if (thumbnailPreviewUrl.value) {
+      URL.revokeObjectURL(thumbnailPreviewUrl.value)
+      thumbnailPreviewUrl.value = null
+    }
+    if (fileInputRef.value) {
+      fileInputRef.value.value = ''
+    }
   }
 
   function resetForm() {
-    state.title = ''
-    state.amount = 0
-    state.date = new Date().toISOString().split('T')[0]
-    state.category = 'Eten & Drinken'
-    state.is_income = false
-    state.notes = ''
-    clearReceipt()
+    state.name = ''
+    state.destination = ''
+    state.start_date = ''
+    state.end_date = ''
+    state.budget = 0
+    state.currency = 'EUR'
+    removeThumbnail()
   }
 
-  watch(
-    () => isOpen.value,
-    (open) => {
-      if (open) {
-        resetForm()
-        if (expenseStore.members.length > 0 && !state.paid_by_member_id) {
-          state.paid_by_member_id = expenseStore.members[0]!.id
-        }
-      }
-    }
-  )
-
-  const memberOptions = computed(() => {
-    return expenseStore.members.map(m => ({
-      label: m.display_name,
-      value: m.id
-    }))
-  })
-
   async function onSubmit(event: FormSubmitEvent<typeof state>) {
-    if (!event.data.title.trim()) return
-    if (Number(event.data.amount) <= 0) {
-      toast.add({ title: 'Voer een geldig bedrag in', color: 'error' })
-      return
-    }
+    if (!event.data.name.trim()) return
 
     isSubmitting.value = true
+
+
     try {
-      let receiptPath: string | null = null
-
-      // Upload en comprimeer foto indien aanwezig
-      if (selectedFile.value && !state.is_income) {
-        receiptPath = await uploadReceipt(selectedFile.value, props.tripId)
-      }
-
-      await expenseStore.createExpense({
-        trip_id: props.tripId,
-        title: event.data.title.trim(),
-        amount: Number(event.data.amount),
-        date: event.data.date,
-        paid_by_member_id: event.data.paid_by_member_id,
-        category: event.data.category,
-        is_income: event.data.is_income,
-        receipt_path: receiptPath,
-        notes: event.data.notes.trim() || null
+      // 1. Maak reis aan
+      const newTrip = await tripStore.createTrip({
+        name: event.data.name.trim(),
+        destination: event.data.destination?.trim() || null,
+        start_date: event.data.start_date || null,
+        end_date: event.data.end_date || null,
+        budget: Number(event.data.budget) > 0 ? Number(event.data.budget) : null,
+        currency: event.data.currency
       })
 
+      // 2. Upload thumbnail als die gekozen is
+      if (thumbnailFile.value && newTrip.id) {
+        const path = await uploadThumbnail(thumbnailFile.value, newTrip.id)
+        if (path) {
+          await tripStore.updateTrip(newTrip.id, { thumbnail_path: path })
+        }
+      }
+
       toast.add({
-        title: event.data.is_income ? 'Inkomst geregistreerd' : 'Uitgave toegevoegd',
+        title: 'Vakantie aangemaakt!',
+        description: `Veel plezier met "${newTrip.name}".`,
         color: 'success'
       })
 
       isOpen.value = false
+      emit('created', newTrip.id)
       resetForm()
     } catch (err: any) {
       toast.add({
-        title: 'Fout bij opslaan',
-        description: err.message,
+        title: 'Fout bij aanmaken',
+        description: err.message || 'Kon de reis niet opslaan.',
         color: 'error'
       })
     } finally {
@@ -143,76 +121,78 @@
 </script>
 
 <template>
-  <UModal v-model:open="isOpen" :title="state.is_income ? 'Nieuwe Inkomst / Gift' : 'Nieuwe Uitgave'"
-    :description="state.is_income ? 'Voeg ontvangen geld toe aan de reis' : 'Registreer een uitgave met bonnetje en notities'"
-    class="expense-modal">
+  <UModal v-model:open="isOpen" title="Nieuwe Reis Plannen"
+    description="Maak een reisomgeving aan om budgetten en kosten bij te houden.">
     <template #body>
-      <UForm :state="state" class="expense-form" @submit="onSubmit">
-        <!-- Type switch -->
-        <div class="expense-form__type-switch">
-          <UButton :variant="!state.is_income ? 'solid' : 'ghost'" color="primary" label="Uitgave"
-            icon="i-lucide-arrow-up-right" class="flex-1" @click="state.is_income = false" />
-          <UButton :variant="state.is_income ? 'solid' : 'ghost'" color="success" label="Inkomst / Cadeau"
-            icon="i-lucide-gift" class="flex-1" @click="state.is_income = true" />
-        </div>
-
-        <!-- Bedrag -->
-        <div class="expense-form__amount-box">
-          <span class="expense-form__currency-symbol">{{ props.currency || '€' }}</span>
-          <UInputNumber v-model="state.amount" :increment="false" :decrement="false" :step="0.01" :min="0"
-            :format-options="{ minimumFractionDigits: 2, maximumFractionDigits: 2 }" placeholder="0.00" autofocus
-            class="expense-form__amount-input" />
-        </div>
-
-        <UFormField label="Omschrijving" required name="title">
-          <UInput v-model="state.title" placeholder="bijv. Diner aan het water, Tanken, Bakker" class="w-full" />
+      <UForm :state="state" class="trip-form" @submit="onSubmit">
+        <UFormField label="Naam van de reis" required name="name" class="trip-form__field">
+          <UInput v-model="state.name" placeholder="bijv. Zomervakantie Italië of Weekendje Parijs" autofocus
+            class="trip-form__input" />
         </UFormField>
 
-        <div class="expense-form__grid">
-          <UFormField label="Betaald door / Ontvangen door" required name="paid_by_member_id" class="w-full">
-            <USelect v-model="state.paid_by_member_id" :items="memberOptions" class="w-full" />
-          </UFormField>
-
-          <UFormField label="Datum" required name="date" class="w-full">
-            <UInput v-model="state.date" type="date" class="w-full" />
-          </UFormField>
-        </div>
-
-        <UFormField v-if="!state.is_income" label="Categorie" name="category">
-          <USelect v-model="state.category" :items="categories" class="w-full" />
+        <UFormField label="Bestemming" name="destination" class="trip-form__field">
+          <UInput v-model="state.destination" placeholder="bijv. Toscane, Frankrijk" icon="i-lucide-map-pin"
+            class="trip-form__input" />
         </UFormField>
 
-        <!-- Notities -->
-        <UFormField label="Notitie / Opmerkingen" name="notes">
-          <UTextarea v-model="state.notes" placeholder="Optionele extra toelichting of afspraken..." :rows="2"
-            class="w-full" />
-        </UFormField>
+        <!-- Thumbnail upload sectie -->
+        <div class="trip-thumbnail-field">
+          <span class="trip-thumbnail-field__label">Omslagfoto / Thumbnail</span>
 
-        <!-- Bonnetjes upload (alleen bij uitgaven) -->
-        <div v-if="!state.is_income" class="expense-form__receipt-section">
-          <UFormField label="Bonnetje / Bewijs" help="Wordt automatisch gecomprimeerd naar WebP (< 200 KB)">
-            <input type="file" accept="image/*" class="hidden" ref="fileInputRef" @change="onFileSelected" />
-            <UButton v-if="!selectedFile" icon="i-lucide-camera" label="Bonnetje toevoegen / Foto maken"
-              variant="outline" color="neutral" class="w-full"
-              @click="($refs.fileInputRef as HTMLInputElement).click()" />
-          </UFormField>
+          <input ref="fileInputRef" type="file" accept="image/*" class="trip-thumbnail-field__hidden-input"
+            @change="handleThumbnailSelect" />
 
-          <div v-if="previewUrl" class="receipt-preview">
-            <img :src="previewUrl" alt="Bonnetje preview" class="receipt-preview__img" />
-            <div class="receipt-preview__meta">
-              <span v-if="sizeInfo" class="receipt-preview__badge">
-                {{ sizeInfo.original }} → <strong>{{ sizeInfo.compressed }}</strong>
-              </span>
-              <UButton icon="i-lucide-trash" color="error" variant="soft" size="xs" label="Verwijder foto"
-                @click="clearReceipt" />
+          <div v-if="!thumbnailPreviewUrl" class="trip-thumbnail-field__dropzone" @click="triggerFileInput">
+            <div class="trip-thumbnail-field__icon-wrap">
+              <UIcon :name="isCompressing ? 'i-lucide-loader-circle' : 'i-lucide-image'"
+                class="trip-thumbnail-field__icon" :class="{ 'trip-thumbnail-field__icon--spin': isCompressing }" />
             </div>
+            <div class="trip-thumbnail-field__meta">
+              <span class="trip-thumbnail-field__prompt">
+                {{ isCompressing ? 'Afbeelding optimaliseren...' : 'Kies een sfeervolle omslagfoto' }}
+              </span>
+              <span class="trip-thumbnail-field__hint">JPG, PNG of WEBP (wordt automatisch geoptimaliseerd)</span>
+            </div>
+          </div>
+
+          <div v-else class="trip-thumbnail-field__preview-card">
+            <img :src="thumbnailPreviewUrl" alt="Thumbnail preview" class="trip-thumbnail-field__preview-img" />
+            <div class="trip-thumbnail-field__preview-info">
+              <span class="trip-thumbnail-field__filename truncate">
+                {{ thumbnailFile?.name || 'Omslagfoto' }}
+              </span>
+              <span class="trip-thumbnail-field__filesize">
+                {{ (thumbnailFile?.size ? (thumbnailFile.size / 1024).toFixed(0) : 0) }} KB
+              </span>
+            </div>
+            <UButton icon="i-lucide-x" color="error" variant="ghost" size="xs" title="Foto verwijderen"
+              @click="removeThumbnail" />
           </div>
         </div>
 
-        <div class="expense-form__actions">
+        <div class="trip-form__grid">
+          <UFormField label="Startdatum" name="start_date" class="trip-form__field">
+            <UInput v-model="state.start_date" type="date" class="trip-form__input" />
+          </UFormField>
+
+          <UFormField label="Einddatum" name="end_date" class="trip-form__field">
+            <UInput v-model="state.end_date" type="date" class="trip-form__input" />
+          </UFormField>
+
+          <UFormField label="Totaal Budget (Optioneel)">
+            <UInputNumber v-model="state.budget" :min="0" :step="50"
+              :format-options="{ minimumFractionDigits: 2, maximumFractionDigits: 2 }"
+              placeholder="Geen budget ingesteld" class="w-full" />
+          </UFormField>
+
+          <UFormField label="Valuta" name="currency" class="trip-form__field">
+            <USelect v-model="state.currency" :items="currencyOptions" class="trip-form__input w-full" />
+          </UFormField>
+        </div>
+
+        <div class="trip-form__actions">
           <UButton label="Annuleren" variant="ghost" color="neutral" @click="isOpen = false" />
-          <UButton type="submit" :label="state.is_income ? 'Inkomst Opslaan' : 'Uitgave Toevoegen'" color="primary"
-            :loading="isSubmitting || isUploading" />
+          <UButton type="submit" label="Reis Aanmaken" color="primary" :loading="isSubmitting" />
         </div>
       </UForm>
     </template>
@@ -220,56 +200,23 @@
 </template>
 
 <style lang="scss" scoped>
-  .expense-form {
+  .trip-form {
     display: flex;
     flex-direction: column;
     gap: 1rem;
 
-    &__type-switch {
-      display: flex;
-      background-color: var(--ui-bg-elevated, #f3f4f6);
-      padding: 0.25rem;
-      border-radius: 8px;
-      gap: 0.25rem;
-    }
-
-    &__amount-box {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 0.75rem;
-      background-color: var(--ui-bg-elevated, #f9fafb);
-      border-radius: 8px;
-      border: 1px solid var(--ui-border, #e5e7eb);
-    }
-
-    &__currency-symbol {
-      font-size: 1.5rem;
-      font-weight: 700;
-      color: var(--ui-text, #111827);
-    }
-
-    &__amount-input {
-      font-size: 1.5rem;
-      font-weight: 700;
-      width: 140px;
-    }
-
     &__grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: 1fr;
       gap: 0.75rem;
 
-      @media (max-width: 640px) {
-        grid-template-columns: 1fr;
+      @media (min-width: 640px) {
+        grid-template-columns: repeat(2, 1fr);
       }
     }
 
-    &__receipt-section {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
+    &__input {
+      width: 100%;
     }
 
     &__actions {
@@ -280,35 +227,122 @@
     }
   }
 
-  .receipt-preview {
+  .trip-thumbnail-field {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    border-radius: 8px;
-    background-color: var(--ui-bg-elevated, #f9fafb);
-    border: 1px solid var(--ui-border, #e5e7eb);
+    flex-direction: column;
+    gap: 0.375rem;
 
-    &__img {
-      width: 52px;
-      height: 52px;
-      object-fit: cover;
+    &__label {
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--ui-text, #111827);
+    }
+
+    &__hidden-input {
+      display: none;
+    }
+
+    &__dropzone {
+      display: flex;
+      align-items: center;
+      gap: 0.875rem;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      border: 1.5px dashed var(--ui-border, #d1d5db);
+      background-color: var(--ui-bg-elevated, #f9fafb);
+      cursor: pointer;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+
+      &:hover {
+        border-color: var(--ui-primary, #10b981);
+        background-color: var(--ui-bg-muted, #f3f4f6);
+      }
+    }
+
+    &__icon-wrap {
+      width: 38px;
+      height: 38px;
       border-radius: 6px;
+      background-color: var(--ui-bg, #ffffff);
+      border: 1px solid var(--ui-border-muted, #e5e7eb);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    &__icon {
+      font-size: 1.25rem;
+      color: var(--ui-primary, #10b981);
+
+      &--spin {
+        animation: spin 1s linear infinite;
+      }
     }
 
     &__meta {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.125rem;
+      min-width: 0;
     }
 
-    &__badge {
-      font-size: 0.75rem;
-      color: var(--ui-text-muted, #4b5563);
+    &__prompt {
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--ui-text, #111827);
+    }
 
-      strong {
-        color: #10b981;
-      }
+    &__hint {
+      font-size: 0.6875rem;
+      color: var(--ui-text-muted, #6b7280);
+    }
+
+    &__preview-card {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--ui-border, #e5e7eb);
+      background-color: var(--ui-bg-elevated, #f9fafb);
+    }
+
+    &__preview-img {
+      width: 64px;
+      height: 42px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid var(--ui-border, #e5e7eb);
+      flex-shrink: 0;
+    }
+
+    &__preview-info {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+
+    &__filename {
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--ui-text, #111827);
+    }
+
+    &__filesize {
+      font-size: 0.6875rem;
+      color: var(--ui-text-muted, #6b7280);
+    }
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+
+    to {
+      transform: rotate(360deg);
     }
   }
 </style>

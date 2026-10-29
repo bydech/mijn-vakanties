@@ -2,23 +2,22 @@
 <script setup lang="ts">
   import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
 
+  const inviteStore = useInviteStore()
   const colorMode = useColorMode()
   const supabase = useSupabaseClient()
   const user = useSupabaseUser()
   const toast = useToast()
 
   const navItems: NavigationMenuItem[] = [
-    { label: 'Reizen', icon: 'i-lucide-plane', to: '/overzicht' },
+    { label: 'Reizen', icon: 'i-lucide-plane', to: '/reizen' },
     { label: 'Instellingen', icon: 'i-lucide-settings', to: '/instellingen' }
   ]
 
-  const currentUser = computed(() => ({
-    name: user.value?.user_metadata?.full_name || user.value?.email?.split('@')[0] || 'Reiziger',
-    avatar: {
-      src: user.value?.user_metadata?.avatar_url || 'https://github.com/nuxt.png',
-      alt: user.value?.email || 'User'
-    }
-  }))
+  onMounted(async () => {
+    await inviteStore.fetchMyPendingInvites()
+  })
+
+  const unreadCount = computed(() => inviteStore.pendingInvites.length)
 
   async function handleLogout() {
     const { error } = await supabase.auth.signOut()
@@ -30,11 +29,19 @@
     await navigateTo('/login')
   }
 
-  const userItems = computed<DropdownMenuItem[][]>(() => [
-    [{ label: user.value?.email || 'Gebruiker', icon: 'i-lucide-user', disabled: true }],
+  const userMenuItems = computed<DropdownMenuItem[][]>(() => [
+    [{ label: user.value?.email || 'Account', icon: 'i-lucide-user', disabled: true }],
     [
       {
-        label: 'Weergave',
+        label: 'Notificaties',
+        icon: 'i-lucide-bell',
+        to: '/notificaties',
+        badge: unreadCount.value > 0 ? String(unreadCount.value) : undefined
+      }
+    ],
+    [
+      {
+        label: 'Thema',
         icon: 'i-lucide-sun-moon',
         children: [
           {
@@ -42,82 +49,80 @@
             icon: 'i-lucide-sun',
             type: 'checkbox',
             checked: colorMode.value === 'light',
-            onUpdateChecked(checked: boolean) { if (checked) colorMode.preference = 'light' }
+            onUpdateChecked(checked: boolean) {
+              if (checked) colorMode.preference = 'light'
+            }
           },
           {
             label: 'Donker',
             icon: 'i-lucide-moon',
             type: 'checkbox',
             checked: colorMode.value === 'dark',
-            onUpdateChecked(checked: boolean) { if (checked) colorMode.preference = 'dark' }
+            onUpdateChecked(checked: boolean) {
+              if (checked) colorMode.preference = 'dark'
+            }
           }
         ]
       }
     ],
     [{ label: 'Uitloggen', icon: 'i-lucide-log-out', color: 'error', onSelect: handleLogout }]
   ])
-
-  const mobileNavItems = computed<NavigationMenuItem[]>(() => [
-    ...navItems,
-    { label: 'Profiel', slot: 'user-profile' as const }
-  ])
 </script>
 
 <template>
-  <UDashboardGroup>
-    <!-- Desktop Sidebar (verborgen op mobiel) -->
-    <UDashboardSidebar collapsible class="hidden md:flex max-w-56">
-      <template #header>
-        <div class="flex items-center gap-2 px-2 py-1.5 overflow-hidden">
-          <UIcon name="i-lucide-palmtree" class="size-6 text-primary shrink-0" />
-          <span class="font-semibold text-sm truncate">Mijn Vakanties</span>
+  <main>
+    <slot />
+  </main>
+
+  <aside class="floating-nav">
+    <div class="floating-nav__pill">
+      <UNavigationMenu color="neutral" variant="link" :items="navItems" class="floating-nav__menu" />
+
+      <div class="floating-nav__divider" />
+
+      <UDropdownMenu :items="userMenuItems" :content="{ side: 'top', align: 'end' }">
+        <div class="relative inline-flex">
+          <UButton icon="i-lucide-user" size="xs" variant="soft" color="neutral" class="rounded-full" />
+          <!-- Notificatie indicator badge op de profielknop -->
+          <UBadge v-if="unreadCount > 0" :label="String(unreadCount)" color="error" size="xs"
+            class="absolute -top-1 -right-1 px-1 min-w-4 h-4 flex items-center justify-center text-[10px] rounded-full pointer-events-none" />
         </div>
-      </template>
-
-      <UNavigationMenu :items="navItems" orientation="vertical" />
-
-      <template #footer>
-        <UDropdownMenu :items="userItems">
-          <UButton v-bind="currentUser" :label="currentUser.name" trailing-icon="i-lucide-chevrons-up-down"
-            color="neutral" variant="ghost" class="w-full" />
-        </UDropdownMenu>
-      </template>
-    </UDashboardSidebar>
-
-    <div class="flex-1 min-w-0 pb-20 md:pb-0">
-      <slot />
+      </UDropdownMenu>
     </div>
-
-    <div class="mobile-bottom-nav md:hidden">
-      <UNavigationMenu :items="mobileNavItems" orientation="horizontal" variant="pill" class="w-full" :ui="{
-        root: 'justify-around border-t border-default py-1.5 px-2 bg-default/90 backdrop-blur-md',
-        item: 'py-0 flex-1',
-        link: 'flex-col gap-1 px-1 py-1.5 justify-center items-center h-full',
-        linkLeadingIcon: 'size-5',
-        linkLabel: 'text-[11px]/3 font-normal'
-      }">
-        <template #user-profile>
-          <UDropdownMenu :items="userItems" :content="{ side: 'top', align: 'end' }">
-            <button type="button"
-              class="w-full flex flex-col items-center justify-center gap-1 px-1 py-1.5 text-muted hover:text-highlighted focus:outline-none transition-colors">
-              <UAvatar :src="currentUser.avatar.src" :alt="currentUser.name" size="2xs" />
-              <span class="text-[11px]/3 font-normal">Profiel</span>
-            </button>
-          </UDropdownMenu>
-        </template>
-      </UNavigationMenu>
-    </div>
-  </UDashboardGroup>
+  </aside>
 </template>
 
 <style lang="scss" scoped>
-  .mobile-bottom-nav {
+
+  .floating-nav {
     position: fixed;
-    bottom: 0;
+    bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
     left: 0;
     right: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     z-index: 50;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    background-color: var(--ui-bg, #ffffff);
+    pointer-events: none;
+    padding: 0 1rem;
+
+    &__pill {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.375rem 0.625rem;
+      border-radius: 9999px;
+      background-color: var(--ui-bg);
+      border: 1px solid var(--ui-border);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    &__divider {
+      width: 1px;
+      height: 1.25rem;
+      background-color: var(--ui-border);
+    }
   }
 </style>

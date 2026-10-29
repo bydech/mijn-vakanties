@@ -54,6 +54,7 @@ export type Database = {
         Row: {
           amount: number
           category: string
+          category_id: string | null
           created_at: string
           created_by: string
           date: string
@@ -61,6 +62,7 @@ export type Database = {
           is_income: boolean
           notes: string | null
           paid_by_member_id: string
+          paid_from_pot: boolean | null
           receipt_path: string | null
           title: string
           trip_id: string
@@ -69,6 +71,7 @@ export type Database = {
         Insert: {
           amount: number
           category?: string
+          category_id?: string | null
           created_at?: string
           created_by?: string
           date?: string
@@ -76,6 +79,7 @@ export type Database = {
           is_income?: boolean
           notes?: string | null
           paid_by_member_id: string
+          paid_from_pot?: boolean | null
           receipt_path?: string | null
           title: string
           trip_id: string
@@ -84,6 +88,7 @@ export type Database = {
         Update: {
           amount?: number
           category?: string
+          category_id?: string | null
           created_at?: string
           created_by?: string
           date?: string
@@ -91,12 +96,20 @@ export type Database = {
           is_income?: boolean
           notes?: string | null
           paid_by_member_id?: string
+          paid_from_pot?: boolean | null
           receipt_path?: string | null
           title?: string
           trip_id?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "expenses_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "trip_categories"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "expenses_paid_by_member_id_fkey"
             columns: ["paid_by_member_id"]
@@ -113,37 +126,140 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          created_at: string
+          data: Json | null
+          id: string
+          is_read: boolean
+          link: string | null
+          message: string
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          data?: Json | null
+          id?: string
+          is_read?: boolean
+          link?: string | null
+          message: string
+          title: string
+          type?: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          data?: Json | null
+          id?: string
+          is_read?: boolean
+          link?: string | null
+          message?: string
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      trip_categories: {
+        Row: {
+          color: string
+          created_at: string | null
+          icon: string
+          id: string
+          name: string
+          trip_id: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string | null
+          icon?: string
+          id?: string
+          name: string
+          trip_id: string
+        }
+        Update: {
+          color?: string
+          created_at?: string | null
+          icon?: string
+          id?: string
+          name?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_categories_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_invites: {
+        Row: {
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string
+          role: string
+          status: string
+          trip_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          role?: string
+          status?: string
+          trip_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          role?: string
+          status?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_invites_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trip_members: {
         Row: {
           created_at: string
           display_name: string
-          email: string | null
           id: string
-          invited_by: string | null
           role: Database["public"]["Enums"]["trip_role"]
-          status: Database["public"]["Enums"]["trip_member_status"]
           trip_id: string
           user_id: string | null
         }
         Insert: {
           created_at?: string
           display_name: string
-          email?: string | null
           id?: string
-          invited_by?: string | null
           role?: Database["public"]["Enums"]["trip_role"]
-          status?: Database["public"]["Enums"]["trip_member_status"]
           trip_id: string
           user_id?: string | null
         }
         Update: {
           created_at?: string
           display_name?: string
-          email?: string | null
           id?: string
-          invited_by?: string | null
           role?: Database["public"]["Enums"]["trip_role"]
-          status?: Database["public"]["Enums"]["trip_member_status"]
           trip_id?: string
           user_id?: string | null
         }
@@ -169,6 +285,7 @@ export type Database = {
           is_archived: boolean
           name: string
           start_date: string | null
+          thumbnail_path: string | null
           updated_at: string
         }
         Insert: {
@@ -182,6 +299,7 @@ export type Database = {
           is_archived?: boolean
           name: string
           start_date?: string | null
+          thumbnail_path?: string | null
           updated_at?: string
         }
         Update: {
@@ -195,6 +313,7 @@ export type Database = {
           is_archived?: boolean
           name?: string
           start_date?: string | null
+          thumbnail_path?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -204,7 +323,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_trip_invite: { Args: { invite_id: string }; Returns: Json }
+      is_member_or_creator_of_trip: {
+        Args: { lookup_trip_id: string }
+        Returns: boolean
+      }
+      is_trip_admin: { Args: { trip_id: string }; Returns: boolean }
       is_trip_member: { Args: { trip_id: string }; Returns: boolean }
+      seed_default_trip_categories: {
+        Args: { target_trip_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       trip_member_status: "pending" | "accepted" | "rejected"

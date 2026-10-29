@@ -2,11 +2,18 @@ import type { ModuleOptions as PwaModuleOptions } from "@vite-pwa/nuxt";
 
 export default defineNuxtConfig({
   ssr: false,
-
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
   modules: ["@nuxtjs/supabase", "@nuxt/ui", "@pinia/nuxt", "@vite-pwa/nuxt"],
   css: ["~/assets/css/main.css"],
+
+  supabase: {
+    redirectOptions: {
+      login: "/login",
+      callback: "/confirm",
+      exclude: ["/register"], // <-- Hierdoor mag iedereen /register bezoeken zonder in te loggen!
+    },
+  },
 
   app: {
     head: {

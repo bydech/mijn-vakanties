@@ -1,6 +1,6 @@
 // stores/members.ts
 import { defineStore } from "pinia";
-import type { Database, Tables, TablesInsert, TablesUpdate } from "~/types/database.types";
+import type { Database, Tables } from "~/types/database.types";
 
 export const useMemberStore = defineStore("members", () => {
   const supabase = useSupabaseClient<Database>();
@@ -67,7 +67,7 @@ export const useMemberStore = defineStore("members", () => {
     }
   }
 
-  // Rol bijwerken (bv. van viewer naar member of admin)
+  // Rol bijwerken
   async function updateMemberRole(memberId: string, role: "admin" | "member" | "viewer") {
     isLoading.value = true;
     try {
@@ -82,46 +82,29 @@ export const useMemberStore = defineStore("members", () => {
     }
   }
 
-  // Lid verwijderen
+  // Veilig lid verwijderen
   async function removeMember(memberId: string) {
     isLoading.value = true;
     try {
-      const { error } = await supabase.from("trip_members").delete().eq("id", memberId);
+      const { count: paidCount, error: paidErr } = await supabase.from("expenses").select("*", { count: "exact", head: true }).eq("paid_by_member_id", memberId);
 
-      if (error) throw error;
-      members.value = members.value.filter((m) => m.id !== memberId);
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  // Zichzelf toevoegen via uitnodigingslink
-  async function joinTripWithCurrentUser(tripId: string) {
-    if (!supabaseUser.value) throw new Error("Log eerst in om mee te doen");
-
-    isLoading.value = true;
-    try {
-      const displayName = supabaseUser.value.user_metadata?.full_name || supabaseUser.value.email?.split("@")[0] || "Reisgenoot";
-
-      const { data, error } = await supabase
-        .from("trip_members")
-        .insert({
-          trip_id: tripId,
-          user_id: supabaseUser.value.id,
-          display_name: displayName,
-          role: "member",
-        })
-        .select()
-        .single();
-
-      if (error) {
-        // Indien al lid, negeer duplicate key error
-        if (error.code === "23505") return null;
-        throw error;
+      if (paidErr) throw paidErr;
+      if (paidCount && paidCount > 0) {
+        throw new Error(
+          `Dit lid kan niet worden verwijderd omdat er nog ${paidCount} ${paidCount === 1 ? "uitgave staat" : "uitgaven staan"} die door deze persoon zijn voorgeschoten.`,
+        );
       }
 
-      members.value.push(data);
-      return data;
+      const { count: splitCount, error: splitErr } = await supabase.from("expense_splits").select("*", { count: "exact", head: true }).eq("member_id", memberId);
+
+      if (splitErr) throw splitErr;
+      if (splitCount && splitCount > 0) {
+        throw new Error(`Dit lid kan niet worden verwijderd omdat diegene nog is opgenomen in ${splitCount} kostenverdeling(en). Pas eerst deze uitgaven aan.`);
+      }
+
+      const { error } = await supabase.from("trip_members").delete().eq("id", memberId);
+      if (error) throw error;
+      members.value = members.value.filter((m) => m.id !== memberId);
     } finally {
       isLoading.value = false;
     }
@@ -136,6 +119,5 @@ export const useMemberStore = defineStore("members", () => {
     addGuestMember,
     updateMemberRole,
     removeMember,
-    joinTripWithCurrentUser,
   };
 });

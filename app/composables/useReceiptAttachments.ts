@@ -5,12 +5,13 @@ export function useReceiptAttachment() {
 
   /**
    * Comprimeert en schaalt een foto via HTML5 Canvas
-   * Verkleint smartphoneshot van bijv. 6MB -> ~100-200KB WebP
+   * Verkleint smartphoneshot van bijv. 6MB -> ~80-150KB WebP
    */
-  async function compressImage(file: File, maxWidth = 1200, maxHeight = 2000, quality = 0.2): Promise<File> {
+  async function compressImage(file: File, maxWidth = 1200, maxHeight = 1600, quality = 0.3): Promise<File> {
+    // Als het geen afbeeldingsbestand is, sla over
     if (!file.type.startsWith("image/")) return file;
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const img = new Image();
       const objectUrl = URL.createObjectURL(file);
 
@@ -55,9 +56,10 @@ export function useReceiptAttachment() {
         );
       };
 
-      img.onerror = (err) => {
+      img.onerror = () => {
         URL.revokeObjectURL(objectUrl);
-        reject(err);
+        // Fallback: stuur origineel als canvas faalt
+        resolve(file);
       };
 
       img.src = objectUrl;
@@ -65,12 +67,13 @@ export function useReceiptAttachment() {
   }
 
   /**
-   * Comprimeert en uploadt het bonnetje naar de private storage map van deze reis
+   * Uploadt het (reeds geoptimaliseerde) bestand naar Supabase Storage
    */
   async function uploadReceipt(file: File, tripId: string): Promise<string | null> {
     isUploading.value = true;
     try {
-      const optimizedFile = await compressImage(file);
+      // Zorg voor een dubbele check: comprimeer als het nog geen webp is
+      const optimizedFile = file.type === "image/webp" ? file : await compressImage(file);
       const filePath = `${tripId}/${Date.now()}.webp`;
 
       const { data, error } = await supabase.storage.from("receipts").upload(filePath, optimizedFile, {
@@ -89,13 +92,9 @@ export function useReceiptAttachment() {
     }
   }
 
-  /**
-   * Vraagt een beveiligde Signed URL op om de private afbeelding te bekijken
-   */
   async function getSignedUrl(filePath: string, expiresIn = 3600): Promise<string | null> {
     try {
       const { data, error } = await supabase.storage.from("receipts").createSignedUrl(filePath, expiresIn);
-
       if (error) throw error;
       return data.signedUrl;
     } catch (err) {
@@ -104,13 +103,9 @@ export function useReceiptAttachment() {
     }
   }
 
-  /**
-   * Verwijdert een bonnetje uit de storage bucket
-   */
   async function deleteReceipt(filePath: string): Promise<boolean> {
     try {
       const { error } = await supabase.storage.from("receipts").remove([filePath]);
-
       if (error) throw error;
       return true;
     } catch (err) {
