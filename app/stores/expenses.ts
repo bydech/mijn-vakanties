@@ -1,37 +1,28 @@
 // stores/expenses.ts
 import { defineStore } from "pinia";
-import type { Database, Tables, TablesInsert, TablesUpdate } from "~/types/database.types";
-export interface SplitPayload {
-  member_id: string;
-  amount: number;
-}
-export type ExpenseWithPayer = Tables<"expenses"> & {
-  paid_by?: Tables<"trip_members"> | null;
-};
+import type { ExpenseRecord, ExpenseSplitRecord, SplitPayload, TripMemberRecord } from "~/types/pocketbase.types";
 
 export const useExpenseStore = defineStore("expenses", () => {
-  const supabase = useSupabaseClient<Database>();
-  const supabaseUser = useSupabaseUser();
+  const { $pb } = useNuxtApp();
 
-  const expenses = ref<ExpenseWithPayer[]>([]);
-  const members = ref<Tables<"trip_members">[]>([]);
+  const expenses = ref<ExpenseRecord[]>([]);
+  const members = ref<TripMemberRecord[]>([]);
   const isLoading = ref(false);
 
-  // Lookup map: { [expenseId]: expenseObject }
-  const expenseMap = computed<Record<string, ExpenseWithPayer>>(() => {
-    const map: Record<string, ExpenseWithPayer> = {};
+  const expenseMap = computed<Record<string, ExpenseRecord>>(() => {
+    const map: Record<string, ExpenseRecord> = {};
     for (const exp of expenses.value) {
       map[exp.id] = exp;
     }
     return map;
   });
 
-  // Groepeer uitgaven per datum (meest recente datum bovenaan)
   const expensesByDate = computed(() => {
-    const groups: Record<string, { date: string; total: number; items: ExpenseWithPayer[] }> = {};
+    const groups: Record<string, { date: string; total: number; items: ExpenseRecord[] }> = {};
 
     for (const exp of expenses.value) {
-      const dateKey = exp.date;
+      const dateKey = (exp.date ? exp.date.split(/[ T]/)[0] : "") || "Onbekend";
+
       if (!groups[dateKey]) {
         groups[dateKey] = {
           date: dateKey,
@@ -40,68 +31,84 @@ export const useExpenseStore = defineStore("expenses", () => {
         };
       }
       groups[dateKey].items.push(exp);
-      // Alleen uitgaven optellen bij het dagtotaal (inkomsten/giften niet)
+
       if (!exp.is_income) {
         groups[dateKey].total += Number(exp.amount || 0);
       }
     }
 
-    // Sorteer dagen aflopend (nieuwste dag eerst)
     return Object.values(groups).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   });
 
-  // Totaal uitgegeven bedrag binnen de reis
   const totalSpent = computed(() => {
     return expenses.value.filter((e) => !e.is_income).reduce((sum, e) => sum + Number(e.amount || 0), 0);
   });
 
-  // Totaal aan inkomsten / giften binnen de reis
   const totalIncome = computed(() => {
     return expenses.value.filter((e) => e.is_income).reduce((sum, e) => sum + Number(e.amount || 0), 0);
   });
 
-  // Haal uitgaven en leden op voor een specifieke trip
+  function getReceiptUrl(expense: ExpenseRecord): string | null {
+    if (!expense.receipt) return null;
+    return $pb.files.getURL(expense, expense.receipt);
+  }
+
   async function fetchByTripId(tripId: string) {
     isLoading.value = true;
     try {
-      const { data, error } = await supabase.from("expenses").select("*, splits:expense_splits(*)").eq("trip_id", tripId).order("date", { ascending: false });
+      const records = await $pb.collection("expenses").getFullList<ExpenseRecord>({
+        filter: `trip = "${tripId}"`,
+        sort: "-date,-created",
+        expand: "paid_by,category,expense_splits_via_expense",
+        requestKey: null,
+      });
 
-      if (error) throw error;
-      expenses.value = data || [];
+      expenses.value = records;
       return expenses.value;
+    } catch (err: any) {
+      if (!err?.isAbort) {
+        console.error("Fout bij ophalen uitgaven:", err);
+      }
+      return [];
     } finally {
       isLoading.value = false;
     }
   }
 
-  // Nieuwe uitgave toevoegen
-  async function createExpense(payload: TablesInsert<"expenses">, splits?: SplitPayload[]) {
+  async function createExpense(payload: Partial<ExpenseRecord> | FormData, splits?: SplitPayload[]) {
     isLoading.value = true;
     try {
-      const { data: newExpense, error } = await supabase.from("expenses").insert(payload).select("*, paid_by:paid_by_member_id(*)").single();
+      const newExpense = await $pb.collection("expenses").create<ExpenseRecord>(payload, {
+        expand: "paid_by,category",
+      });
 
-      if (error) throw error;
+      let createdSplits: ExpenseSplitRecord[] = [];
+      const isIncome = payload instanceof FormData ? payload.get("is_income") === "true" : Boolean(payload.is_income);
 
-      // Splits toevoegen indien aanwezig
-      let createdSplits: Tables<"expense_splits">[] = [];
-
-      if (splits && splits.length > 0 && !payload.is_income) {
-        const splitRows = splits.map((s) => ({
-          expense_id: newExpense.id,
-          member_id: s.member_id,
-          amount: s.amount,
-        }));
-
-        const { data: insertedSplits, error: splitErr } = await supabase.from("expense_splits").insert(splitRows).select();
-
-        if (splitErr) {
-          console.error("Fout bij opslaan splits:", splitErr);
-          throw splitErr; // Gooi de error zodat de toast direct aangeeft wat er mis is!
-        }
-        createdSplits = insertedSplits || [];
+      if (splits && splits.length > 0 && !isIncome) {
+        // requestKey: null voorkomt dat PocketBase gelijktijdige split-requests annuleert!
+        createdSplits = await Promise.all(
+          splits.map((s) =>
+            $pb.collection("expense_splits").create<ExpenseSplitRecord>(
+              {
+                expense: newExpense.id,
+                member: s.member_id,
+                amount: Number(s.amount),
+              },
+              { requestKey: null },
+            ),
+          ),
+        );
       }
 
-      const fullExpense = { ...newExpense, splits: createdSplits };
+      const fullExpense: ExpenseRecord = {
+        ...newExpense,
+        expand: {
+          ...newExpense.expand,
+          expense_splits_via_expense: createdSplits,
+        },
+      };
+
       expenses.value.unshift(fullExpense);
       return fullExpense;
     } finally {
@@ -109,45 +116,52 @@ export const useExpenseStore = defineStore("expenses", () => {
     }
   }
 
-  // 3. Uitgave bijwerken inclusief splits
-  async function updateExpense(expenseId: string, payload: TablesUpdate<"expenses">, splits?: SplitPayload[]) {
+  async function updateExpense(expenseId: string, payload: Partial<ExpenseRecord> | FormData, splits?: SplitPayload[]) {
     isLoading.value = true;
     try {
-      // 1. Update de expense en gebruik maybeSingle() in plaats van single()
-      const { data: updatedExpense, error } = await supabase.from("expenses").update(payload).eq("id", expenseId).select("*, paid_by:paid_by_member_id(*)").maybeSingle();
+      const updatedExpense = await $pb.collection("expenses").update<ExpenseRecord>(expenseId, payload, {
+        expand: "paid_by,category",
+      });
 
-      if (error) throw error;
+      const existingSplits = await $pb.collection("expense_splits").getFullList<ExpenseSplitRecord>({
+        filter: `expense = "${expenseId}"`,
+        requestKey: null,
+      });
 
-      if (!updatedExpense) {
-        throw new Error("Geen rechten om deze uitgave te bewerken of uitgave niet gevonden.");
+      if (existingSplits.length > 0) {
+        await Promise.all(existingSplits.map((s) => $pb.collection("expense_splits").delete(s.id, { requestKey: null })));
       }
 
-      // 2. Eerst bestaande splits wissen voor deze expense
-      const { error: deleteSplitsErr } = await supabase.from("expense_splits").delete().eq("expense_id", expenseId);
+      let updatedSplits: ExpenseSplitRecord[] = [];
+      const isIncome = payload instanceof FormData ? payload.get("is_income") === "true" : Boolean(payload.is_income);
 
-      if (deleteSplitsErr) throw deleteSplitsErr;
-
-      // 3. Nieuwe splits toevoegen indien aanwezig
-      let updatedSplits: Tables<"expense_splits">[] = [];
-      if (splits && splits.length > 0 && !payload.is_income) {
-        const splitRows = splits.map((s) => ({
-          expense_id: expenseId,
-          member_id: s.member_id,
-          amount: s.amount,
-        }));
-
-        const { data: insertedSplits, error: splitErr } = await supabase.from("expense_splits").insert(splitRows).select();
-
-        if (splitErr) {
-          console.error("Fout bij updaten splits:", splitErr);
-          throw splitErr;
-        }
-        updatedSplits = insertedSplits || [];
+      if (splits && splits.length > 0 && !isIncome) {
+        updatedSplits = await Promise.all(
+          splits.map((s) =>
+            $pb.collection("expense_splits").create<ExpenseSplitRecord>(
+              {
+                expense: expenseId,
+                member: s.member_id,
+                amount: Number(s.amount),
+              },
+              { requestKey: null },
+            ),
+          ),
+        );
       }
 
-      const fullExpense = { ...updatedExpense, splits: updatedSplits };
+      const fullExpense: ExpenseRecord = {
+        ...updatedExpense,
+        expand: {
+          ...updatedExpense.expand,
+          expense_splits_via_expense: updatedSplits,
+        },
+      };
+
       const idx = expenses.value.findIndex((e) => e.id === expenseId);
-      if (idx !== -1) expenses.value[idx] = fullExpense;
+      if (idx !== -1) {
+        expenses.value[idx] = fullExpense;
+      }
 
       return fullExpense;
     } finally {
@@ -155,16 +169,10 @@ export const useExpenseStore = defineStore("expenses", () => {
     }
   }
 
-  // Uitgave verwijderen
   async function deleteExpense(id: string) {
     isLoading.value = true;
-    console.log("deleting expense");
-    console.log(id);
     try {
-      const { error } = await supabase.from("expenses").delete().eq("id", id);
-      console.log(error);
-
-      if (error) throw error;
+      await $pb.collection("expenses").delete(id);
       expenses.value = expenses.value.filter((e) => e.id !== id);
     } finally {
       isLoading.value = false;
@@ -179,6 +187,7 @@ export const useExpenseStore = defineStore("expenses", () => {
     expensesByDate,
     totalSpent,
     totalIncome,
+    getReceiptUrl,
     fetchByTripId,
     createExpense,
     updateExpense,

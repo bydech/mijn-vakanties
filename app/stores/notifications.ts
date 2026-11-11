@@ -1,28 +1,32 @@
 // stores/notifications.ts
 import { defineStore } from "pinia";
-import type { Database, Tables } from "~/types/database.types";
-
-export type NotificationItem = Tables<"notifications">;
+import type { NotificationRecord } from "~/types/pocketbase.types";
 
 export const useNotificationStore = defineStore("notifications", () => {
-  const supabase = useSupabaseClient<Database>();
+  const { $pb } = useNuxtApp();
+  const authStore = useAuthStore();
 
-  const notifications = shallowRef<NotificationItem[]>([]);
-
+  const notifications = ref<NotificationRecord[]>([]);
   const isLoading = ref(false);
 
   const unreadCount = computed<number>(() => {
     return notifications.value.reduce((acc, curr) => (!curr.is_read ? acc + 1 : acc), 0);
   });
 
-  // Haal alle notificaties op voor de ingelogde gebruiker
+  /**
+   * Haal alle notificaties op voor de ingelogde gebruiker
+   */
   async function fetchAll() {
+    if (!authStore.user?.id) return [];
+
     isLoading.value = true;
     try {
-      const { data, error } = await supabase.from("notifications").select("*").order("created_at", { ascending: false });
+      const records = await $pb.collection("notifications").getFullList<NotificationRecord>({
+        filter: `user = "${authStore.user.id}"`,
+        sort: "-created",
+      });
 
-      if (error) throw error;
-      notifications.value = data || [];
+      notifications.value = records;
       return notifications.value;
     } catch (err) {
       console.error("Fout bij ophalen notificaties:", err);
@@ -32,44 +36,56 @@ export const useNotificationStore = defineStore("notifications", () => {
     }
   }
 
-  // Markeer specifieke notificatie als gelezen
+  /**
+   * Markeer een specifieke notificatie als gelezen
+   */
   async function markAsRead(id: string) {
     try {
-      const { error } = await supabase.from("notifications").update({ is_read: true }).eq("id", id);
-
-      if (error) throw error;
+      const updated = await $pb.collection("notifications").update<NotificationRecord>(id, {
+        is_read: true,
+      });
 
       const item = notifications.value.find((n) => n.id === id);
-      if (item) item.is_read = true;
+      if (item) {
+        item.is_read = true;
+      }
+      return updated;
     } catch (err) {
       console.error("Fout bij markeren als gelezen:", err);
     }
   }
 
-  // Markeer alles als gelezen
+  /**
+   * Markeer alle ongelezen notificaties als gelezen
+   */
   async function markAllAsRead() {
+    const unread = notifications.value.filter((n) => !n.is_read);
+    if (unread.length === 0) return;
+
+    // Optimistic UI update: zet lokaal al direct op true
+    for (const item of unread) {
+      item.is_read = true;
+    }
+
     try {
-      const unreadIds = notifications.value.filter((n) => !n.is_read).map((n) => n.id);
-      if (unreadIds.length === 0) return;
-
-      const { error } = await supabase.from("notifications").update({ is_read: true }).in("id", unreadIds);
-
-      if (error) throw error;
-
-      for (const item of notifications.value) {
-        item.is_read = true;
-      }
+      await Promise.allSettled(
+        unread.map((n) =>
+          $pb.collection("notifications").update(n.id, {
+            is_read: true,
+          }),
+        ),
+      );
     } catch (err) {
       console.error("Fout bij alles als gelezen markeren:", err);
     }
   }
 
-  // Notificatie verwijderen
+  /**
+   * Notificatie verwijderen
+   */
   async function deleteNotification(id: string) {
     try {
-      const { error } = await supabase.from("notifications").delete().eq("id", id);
-
-      if (error) throw error;
+      await $pb.collection("notifications").delete(id);
       notifications.value = notifications.value.filter((n) => n.id !== id);
     } catch (err) {
       console.error("Fout bij verwijderen notificatie:", err);

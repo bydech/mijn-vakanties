@@ -1,72 +1,52 @@
 <!-- layouts/default.vue -->
 <script setup lang="ts">
-  import type { DropdownMenuItem, NavigationMenuItem } from '@nuxt/ui'
+  import type { NavigationMenuItem } from '@nuxt/ui'
 
+  const authStore = useAuthStore()
   const inviteStore = useInviteStore()
-  const colorMode = useColorMode()
-  const supabase = useSupabaseClient()
-  const user = useSupabaseUser()
-  const toast = useToast()
+  const notificationStore = useNotificationStore()
 
-  const navItems: NavigationMenuItem[] = [
-    { label: 'Reizen', icon: 'i-lucide-plane', to: '/reizen' },
-    { label: 'Instellingen', icon: 'i-lucide-settings', to: '/instellingen' }
-  ]
-
-  onMounted(async () => {
-    await inviteStore.fetchMyPendingInvites()
+  const hasUnreadNotifications = computed(() => {
+    return (
+      inviteStore.pendingInvites.length > 0 ||
+      notificationStore.notifications.length > 0
+    )
   })
 
-  const unreadCount = computed(() => inviteStore.pendingInvites.length)
-
-  async function handleLogout() {
-    const { error } = await supabase.auth.signOut()
-    if (error) {
-      toast.add({ title: 'Fout bij uitloggen', description: error.message, color: 'error' })
-      return
+  const navItems = computed(() => [
+    {
+      label: 'Reizen',
+      icon: 'i-lucide-plane',
+      to: '/reizen'
+    },
+    {
+      label: 'Notificaties',
+      icon: 'i-lucide-bell',
+      to: '/notificaties',
+      slot: 'notifications' as const
+    },
+    {
+      label: 'Instellingen',
+      icon: 'i-lucide-settings',
+      to: '/instellingen'
     }
-    toast.add({ title: 'Uitgelogd', description: 'Tot ziens!', color: 'success' })
-    await navigateTo('/login')
+  ] satisfies NavigationMenuItem[])
+
+  async function loadNotificationCounts() {
+    if (!authStore.isAuthenticated) return
+    await Promise.all([
+      inviteStore.fetchMyPendingInvites(),
+      notificationStore.fetchAll()
+    ])
   }
 
-  const userMenuItems = computed<DropdownMenuItem[][]>(() => [
-    [{ label: user.value?.email || 'Account', icon: 'i-lucide-user', disabled: true }],
-    [
-      {
-        label: 'Notificaties',
-        icon: 'i-lucide-bell',
-        to: '/notificaties',
-        badge: unreadCount.value > 0 ? String(unreadCount.value) : undefined
-      }
-    ],
-    [
-      {
-        label: 'Thema',
-        icon: 'i-lucide-sun-moon',
-        children: [
-          {
-            label: 'Licht',
-            icon: 'i-lucide-sun',
-            type: 'checkbox',
-            checked: colorMode.value === 'light',
-            onUpdateChecked(checked: boolean) {
-              if (checked) colorMode.preference = 'light'
-            }
-          },
-          {
-            label: 'Donker',
-            icon: 'i-lucide-moon',
-            type: 'checkbox',
-            checked: colorMode.value === 'dark',
-            onUpdateChecked(checked: boolean) {
-              if (checked) colorMode.preference = 'dark'
-            }
-          }
-        ]
-      }
-    ],
-    [{ label: 'Uitloggen', icon: 'i-lucide-log-out', color: 'error', onSelect: handleLogout }]
-  ])
+  watch(
+    () => authStore.isAuthenticated,
+    (isAuth) => {
+      if (isAuth) loadNotificationCounts()
+    },
+    { immediate: true }
+  )
 </script>
 
 <template>
@@ -76,24 +56,18 @@
 
   <aside class="floating-nav">
     <div class="floating-nav__pill">
-      <UNavigationMenu color="neutral" variant="link" :items="navItems" class="floating-nav__menu" />
-
-      <div class="floating-nav__divider" />
-
-      <UDropdownMenu :items="userMenuItems" :content="{ side: 'top', align: 'end' }">
-        <div class="relative inline-flex">
-          <UButton icon="i-lucide-user" size="xs" variant="soft" color="neutral" class="rounded-full" />
-          <!-- Notificatie indicator badge op de profielknop -->
-          <UBadge v-if="unreadCount > 0" :label="String(unreadCount)" color="error" size="xs"
-            class="absolute -top-1 -right-1 px-1 min-w-4 h-4 flex items-center justify-center text-[10px] rounded-full pointer-events-none" />
-        </div>
-      </UDropdownMenu>
+      <UNavigationMenu color="neutral" variant="link" :items="navItems" class="floating-nav__menu">
+        <template #notifications-leading="{ item }">
+          <UChip :show="hasUnreadNotifications" color="error" size="xs" inset>
+            <UIcon :name="item.icon!" class="size-5 shrink-0" />
+          </UChip>
+        </template>
+      </UNavigationMenu>
     </div>
   </aside>
 </template>
 
 <style lang="scss" scoped>
-
   .floating-nav {
     position: fixed;
     bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));

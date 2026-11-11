@@ -4,7 +4,6 @@
 
   const tripStore = useTripStore()
   const inviteStore = useInviteStore()
-  const { getThumbnailUrl } = useTripThumbnail()
 
   const isCreateTripOpen = ref(false)
 
@@ -55,8 +54,8 @@
       <UDashboardNavbar title="Mijn Reizen" />
       <UDashboardToolbar>
         <template #right>
-          <UTabs v-model="activeTab" :items="tabItems" :content="false" variant="pill" size="sm" />
-          <UButton icon="i-lucide-plus" label="Nieuwe Reis" size="sm" @click="isCreateTripOpen = true" />
+          <UTabs v-model="activeTab" :items="tabItems" :content="false" variant="pill" />
+          <UButton icon="i-lucide-plus" label="Nieuwe Reis" @click="isCreateTripOpen = true" />
         </template>
       </UDashboardToolbar>
     </template>
@@ -93,7 +92,7 @@
           </template>
 
           <div class="trip-card__image-container">
-            <img :src="getThumbnailUrl(trip.thumbnail_path) || `https://picsum.photos/seed/${trip.id}/600/300`"
+            <img :src="tripStore.getThumbnailUrl(trip) || `https://picsum.photos/seed/${trip.id}/600/300`"
               :alt="trip.name" class="trip-card__image" loading="lazy" />
           </div>
 

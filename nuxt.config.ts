@@ -4,16 +4,11 @@ export default defineNuxtConfig({
   ssr: false,
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
-  modules: ["@nuxtjs/supabase", "@nuxt/ui", "@pinia/nuxt", "@vite-pwa/nuxt"],
-  css: ["~/assets/css/main.css"],
 
-  supabase: {
-    redirectOptions: {
-      login: "/login",
-      callback: "/confirm",
-      exclude: ["/register"], // <-- Hierdoor mag iedereen /register bezoeken zonder in te loggen!
-    },
-  },
+  // 1. Verwijder "@nuxtjs/supabase" uit de modules array
+  modules: ["@nuxt/ui", "@pinia/nuxt", "@vite-pwa/nuxt"],
+
+  css: ["~/assets/css/main.css", "~/assets/scss/main.scss"],
 
   app: {
     head: {
@@ -41,7 +36,7 @@ export default defineNuxtConfig({
       background_color: "#ffffff",
       display: "standalone",
       orientation: "portrait",
-      start_url: "/overzicht",
+      start_url: "/reizen",
       icons: [
         {
           src: "/pwa-192x192.png",

@@ -4,23 +4,13 @@
   import type { FormSubmitEvent, AuthFormField } from '@nuxt/ui'
 
   definePageMeta({
-    layout: false
+    layout: false,
   })
 
-  const supabase = useSupabaseClient()
-  const user = useSupabaseUser()
+
+  const authStore = useAuthStore()
   const toast = useToast()
   const loading = ref(false)
-
-  watch(
-    user,
-    (newUser) => {
-      if (newUser) {
-        navigateTo('/overzicht')
-      }
-    },
-    { immediate: true }
-  )
 
   const fields: AuthFormField[] = [
     {
@@ -57,24 +47,11 @@
   async function onSubmit(payload: FormSubmitEvent<Schema>) {
     loading.value = true
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: payload.data.email,
-        password: payload.data.password,
-        options: {
-          data: {
-            full_name: payload.data.name
-          }
-        }
-      })
-
-      if (error) {
-        toast.add({
-          title: 'Registratie mislukt',
-          description: error.message,
-          color: 'error'
-        })
-        return
-      }
+      await authStore.register(
+        payload.data.email,
+        payload.data.password,
+        payload.data.name
+      )
 
       toast.add({
         title: 'Account aangemaakt!',
@@ -82,15 +59,11 @@
         color: 'success'
       })
 
-      if (data.session) {
-        await navigateTo('/overzicht')
-      } else {
-        navigateTo('/login')
-      }
+      await navigateTo('/reizen')
     } catch (err: any) {
       toast.add({
-        title: 'Fout',
-        description: err.message || 'Er is iets misgegaan',
+        title: 'Registratie mislukt',
+        description: err.message || 'Er is iets misgegaan bij het registreren.',
         color: 'error'
       })
     } finally {
@@ -100,15 +73,15 @@
 </script>
 
 <template>
-  <div class="flex min-h-screen items-center justify-center p-4">
-    <UPageCard class="w-full max-w-md">
+  <div class="auth-layout">
+    <UPageCard class="auth-layout__card">
       <UAuthForm :schema="schema" :fields="fields" :loading="loading" title="Account Aanmaken"
         description="Registreer je om deel te nemen aan vakanties en kosten bij te houden." icon="i-lucide-user-plus"
         @submit="onSubmit">
         <template #footer>
-          <div class="text-center text-sm text-neutral-500 mt-4">
+          <div class="auth-layout__footer">
             Al een account?
-            <NuxtLink to="/login" class="text-primary font-medium hover:underline">
+            <NuxtLink to="/login" class="auth-layout__link">
               Hier inloggen
             </NuxtLink>
           </div>

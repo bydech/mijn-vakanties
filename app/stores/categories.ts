@@ -1,34 +1,43 @@
 // stores/categories.ts
 import { defineStore } from "pinia";
-import type { Database, Tables, TablesInsert, TablesUpdate } from "~/types/database.types";
+import type { TripCategoryRecord } from "~/types/pocketbase.types";
 
 export const useCategoryStore = defineStore("categories", () => {
-  const supabase = useSupabaseClient<Database>();
+  const { $pb } = useNuxtApp();
 
-  const categories = ref<Tables<"trip_categories">[]>([]);
+  const categories = ref<TripCategoryRecord[]>([]);
   const isLoading = ref(false);
 
+  /**
+   * Categorieën ophalen voor een specifieke reis (alfabetisch gesorteerd)
+   */
   async function fetchByTripId(tripId: string) {
     isLoading.value = true;
     try {
-      const { data, error } = await supabase.from("trip_categories").select("*").eq("trip_id", tripId).order("name", { ascending: true });
+      const records = await $pb.collection("trip_categories").getFullList<TripCategoryRecord>({
+        filter: `trip = "${tripId}"`,
+        sort: "name",
+      });
 
-      if (error) throw error;
-      categories.value = data || [];
+      categories.value = records;
       return categories.value;
+    } catch (err) {
+      console.error("Fout bij ophalen van categorieën:", err);
+      return [];
     } finally {
       isLoading.value = false;
     }
   }
 
-  async function createCategory(payload: TablesInsert<"trip_categories">) {
+  /**
+   * Nieuwe categorie toevoegen
+   */
+  async function createCategory(payload: Partial<TripCategoryRecord>) {
     isLoading.value = true;
     try {
-      const { data, error } = await supabase.from("trip_categories").insert(payload).select().single();
+      const data = await $pb.collection("trip_categories").create<TripCategoryRecord>(payload);
 
-      if (error) throw error;
       categories.value.push(data);
-      // Houd netjes alfabetisch gesorteerd
       categories.value.sort((a, b) => a.name.localeCompare(b.name));
       return data;
     } finally {
@@ -36,18 +45,17 @@ export const useCategoryStore = defineStore("categories", () => {
     }
   }
 
-  // stores/categories.ts
-  async function updateCategory(id: string, payload: TablesUpdate<"trip_categories">) {
+  /**
+   * Categorie bijwerken
+   */
+  async function updateCategory(id: string, payload: Partial<TripCategoryRecord>) {
     isLoading.value = true;
     try {
-      const { data, error } = await supabase.from("trip_categories").update(payload).eq("id", id).select().single();
-
-      if (error) throw error;
+      const data = await $pb.collection("trip_categories").update<TripCategoryRecord>(id, payload);
 
       const idx = categories.value.findIndex((c) => c.id === id);
       if (idx !== -1) {
         categories.value[idx] = data;
-        // Houd netjes alfabetisch gesorteerd
         categories.value.sort((a, b) => a.name.localeCompare(b.name));
       }
 
@@ -57,20 +65,22 @@ export const useCategoryStore = defineStore("categories", () => {
     }
   }
 
+  /**
+   * Categorie verwijderen (met check op bestaande uitgaven)
+   */
   async function deleteCategory(id: string) {
     isLoading.value = true;
     try {
-      // Optioneel: check of er nog uitgaven zijn gekoppeld
-      const { count, error: countErr } = await supabase.from("expenses").select("*", { count: "exact", head: true }).eq("category_id", id);
+      // Controleer of er nog uitgaven zijn gekoppeld aan deze categorie
+      const linkedExpenses = await $pb.collection("expenses").getList(1, 1, {
+        filter: `category = "${id}"`,
+      });
 
-      if (countErr) throw countErr;
-      if (count && count > 0) {
-        throw new Error(`Deze categorie kan niet worden verwijderd omdat er nog ${count} uitgave(n) aan zijn gekoppeld.`);
+      if (linkedExpenses.totalItems > 0) {
+        throw new Error(`Deze categorie kan niet worden verwijderd omdat er nog ${linkedExpenses.totalItems} uitgave(n) aan zijn gekoppeld.`);
       }
 
-      const { error } = await supabase.from("trip_categories").delete().eq("id", id);
-
-      if (error) throw error;
+      await $pb.collection("trip_categories").delete(id);
       categories.value = categories.value.filter((c) => c.id !== id);
     } finally {
       isLoading.value = false;

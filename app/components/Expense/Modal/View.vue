@@ -1,46 +1,32 @@
 <!-- components/ExpenseModalView.vue -->
 <script setup lang="ts">
-  import { useReceiptAttachment } from '~/composables/useReceiptAttachments'
-  import type { Tables } from '~/types/database.types'
+  import type { ExpenseRecord, ExpenseSplitRecord, TripMemberRecord } from '~/types/pocketbase.types'
 
   const isOpen = defineModel<boolean>('open', { default: false })
 
-  export type ExpenseDetailWithSplits = Tables<'expenses'> & {
-    paid_by?: Tables<'trip_members'> | null
-    splits?: (Tables<'expense_splits'> & {
-      member?: Tables<'trip_members'> | null
-    })[] | null
-  }
-
   const props = defineProps<{
-    expense: ExpenseDetailWithSplits | null
+    expense: ExpenseRecord | null
     currency?: string
   }>()
 
   const emit = defineEmits<{
-    (e: 'edit', expense: Tables<'expenses'>): void
-    (e: 'delete', expense: Tables<'expenses'>): void
+    (e: 'edit', expense: ExpenseRecord): void
+    (e: 'delete', expense: ExpenseRecord): void
   }>()
 
   const memberStore = useMemberStore()
   const categoryStore = useCategoryStore()
-  const { getSignedUrl } = useReceiptAttachment()
-  const signedReceiptUrl = ref<string | null>(null)
-  const isLoadingReceipt = ref(false)
+  const { getReceiptUrl } = useReceiptAttachment()
   const isLightboxOpen = ref(false)
 
-  watch(
-    () => props.expense?.receipt_path,
-    async (path) => {
-      signedReceiptUrl.value = null
-      if (path) {
-        isLoadingReceipt.value = true
-        signedReceiptUrl.value = await getSignedUrl(path)
-        isLoadingReceipt.value = false
-      }
-    },
-    { immediate: true }
-  )
+  const receiptUrl = computed(() => {
+    if (!props.expense?.receipt) return null
+    return getReceiptUrl(props.expense)
+  })
+
+  const splits = computed<ExpenseSplitRecord[]>(() => {
+    return props.expense?.expand?.expense_splits_via_expense || []
+  })
 
   function formatCurrency(amount: number) {
     return new Intl.NumberFormat('nl-NL', {
@@ -59,21 +45,26 @@
     }).format(new Date(dateStr))
   }
 
+  function getMember(memberId?: string | null): TripMemberRecord | undefined {
+    if (!memberId) return undefined
+    return memberStore.members.find(m => m.id === memberId)
+  }
+
   function getMemberName(memberId?: string | null): string {
     if (!memberId) return 'Onbekend'
-    const member = memberStore.memberMap[memberId]
+    const member = getMember(memberId)
     return member?.display_name || 'Iemand'
   }
 
   function isMemberGuest(memberId: string): boolean {
-    const member = memberStore.memberMap[memberId]
-    return !member?.user_id
+    const member = getMember(memberId)
+    return !member?.user
   }
 
   function getCategoryName(categoryId?: string | null): string {
-    if (!categoryId) return props.expense?.category || 'Onbekend'
+    if (!categoryId) return 'Geen categorie'
     const cat = categoryStore.categories.find(c => c.id === categoryId)
-    return cat?.name || props.expense?.category || 'Onbekend'
+    return cat?.name || 'Onbekend'
   }
 
   function handleEdit() {
@@ -111,36 +102,41 @@
             <div class="expense-detail__cell">
               <span class="expense-detail__label">Betaald door</span>
               <span class="expense-detail__val">
-                {{ getMemberName(expense.paid_by_member_id) }}
+                <template v-if="expense.paid_from_pot">
+                  Gezamenlijke pot
+                </template>
+                <template v-else>
+                  {{ expense.expand?.paid_by?.display_name || getMemberName(expense.paid_by) }}
+                </template>
               </span>
             </div>
 
             <div v-if="!expense.is_income" class="expense-detail__cell">
               <span class="expense-detail__label">Categorie</span>
               <span class="expense-detail__val">
-                {{ getCategoryName(expense.category_id) }}
+                {{ expense.expand?.category?.name || getCategoryName(expense.category) }}
               </span>
             </div>
           </div>
 
           <!-- Kostenverdeling / Splits Sectie (Alleen voor uitgaven) -->
-          <section v-if="!expense.is_income" class="expense-detail__section">
+          <section v-if="!expense.is_income && !expense.paid_from_pot" class="expense-detail__section">
             <div class="expense-detail__section-header">
               <h4 class="expense-detail__section-title">Wie betaalt mee</h4>
-              <span v-if="expense.splits && expense.splits.length > 0" class="expense-detail__section-count">
-                {{ expense.splits.length }} {{ expense.splits.length === 1 ? 'persoon' : 'personen' }}
+              <span v-if="splits.length > 0" class="expense-detail__section-count">
+                {{ splits.length }} {{ splits.length === 1 ? 'persoon' : 'personen' }}
               </span>
             </div>
 
             <!-- Ingedeelden lijst -->
-            <div v-if="expense.splits && expense.splits.length > 0" class="expense-detail__splits-list">
-              <div v-for="split in expense.splits" :key="split.id" class="expense-detail__split-row">
+            <div v-if="splits.length > 0" class="expense-detail__splits-list">
+              <div v-for="split in splits" :key="split.id" class="expense-detail__split-row">
                 <div class="expense-detail__split-member">
                   <UIcon name="i-lucide-user" class="expense-detail__split-icon" />
                   <span class="expense-detail__split-name">
-                    {{ split.member?.display_name || getMemberName(split.member_id) }}
+                    {{ getMemberName(split.member) }}
                   </span>
-                  <UBadge v-if="isMemberGuest(split.member_id)" color="neutral" variant="subtle" size="xs">
+                  <UBadge v-if="isMemberGuest(split.member)" color="neutral" variant="subtle" size="xs">
                     Gast
                   </UBadge>
                 </div>
@@ -174,10 +170,10 @@
           </section>
 
           <!-- Bonnetjes sectie -->
-          <section v-if="expense.receipt_path" class="expense-detail__section">
+          <section v-if="expense.receipt" class="expense-detail__section">
             <h4 class="expense-detail__section-title">Bonnetje / Bewijs</h4>
-            <div v-if="signedReceiptUrl" class="expense-detail__receipt-card" @click="isLightboxOpen = true">
-              <img :src="signedReceiptUrl" alt="Bonnetje" class="expense-detail__receipt-thumb" />
+            <div v-if="receiptUrl" class="expense-detail__receipt-card" @click="isLightboxOpen = true">
+              <img :src="receiptUrl" alt="Bonnetje" class="expense-detail__receipt-thumb" />
               <div class="expense-detail__receipt-info">
                 <span class="expense-detail__receipt-label">Gekoppeld betaalbewijs</span>
                 <span class="expense-detail__receipt-action">
@@ -185,11 +181,6 @@
                   Tik voor vergroting
                 </span>
               </div>
-            </div>
-
-            <div v-else-if="isLoadingReceipt" class="expense-detail__receipt-loading">
-              <UIcon name="i-lucide-loader-circle" class="expense-detail__receipt-spinner" />
-              <span>Beveiligde foto autoriseren...</span>
             </div>
           </section>
         </div>
@@ -207,13 +198,13 @@
     <UModal v-model:open="isLightboxOpen" title="Bonnetje Vergroot">
       <template #body>
         <div class="lightbox-body">
-          <img v-if="signedReceiptUrl" :src="signedReceiptUrl" alt="Bonnetje vergroot" class="lightbox-body__image" />
+          <img v-if="receiptUrl" :src="receiptUrl" alt="Bonnetje vergroot" class="lightbox-body__image" />
         </div>
       </template>
       <template #footer>
         <div class="lightbox-footer">
-          <UButton v-if="signedReceiptUrl" icon="i-lucide-external-link" label="Open in nieuw venster" variant="ghost"
-            color="neutral" :to="signedReceiptUrl" target="_blank" />
+          <UButton v-if="receiptUrl" icon="i-lucide-external-link" label="Open in nieuw venster" variant="ghost"
+            color="neutral" :to="receiptUrl" target="_blank" />
           <UButton label="Sluiten" color="primary" @click="isLightboxOpen = false" />
         </div>
       </template>
@@ -442,21 +433,6 @@
       font-size: 0.875rem;
     }
 
-    &__receipt-loading {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 1rem;
-      font-size: 0.8125rem;
-      color: var(--ui-text-muted, #6b7280);
-    }
-
-    &__receipt-spinner {
-      font-size: 1.25rem;
-      color: var(--ui-primary, #10b981);
-      animation: spin 1s linear infinite;
-    }
-
     &__actions {
       display: flex;
       justify-content: flex-end;
@@ -484,15 +460,5 @@
     display: flex;
     justify-content: space-between;
     width: 100%;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

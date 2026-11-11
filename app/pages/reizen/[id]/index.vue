@@ -20,8 +20,18 @@
 
   const selectedExpense = ref<any>(null)
 
+  const budgetPercentage = computed(() => {
+    const budget = Number(trip.value?.budget || 0)
+    if (budget <= 0) return 0
+    return Math.min(100, (expenseStore.totalSpent / budget) * 100)
+  })
+
   const trip = computed(() => {
     return tripStore.trips.find((t) => t.id === tripId) ?? null
+  })
+
+  const memberMap = computed(() => {
+    return new Map(memberStore.members.map((m) => [m.id, m]))
   })
 
   const categoryMap = computed(() => {
@@ -32,20 +42,10 @@
     return Number(trip.value?.budget || 0) > 0
   })
 
-  const budgetPercentage = computed(() => {
-    const budget = Number(trip.value?.budget || 0)
-    if (budget <= 0) return 0
-    return Math.min(100, (expenseStore.totalSpent / budget) * 100)
-  })
-
   function getCategory(categoryId?: string | null) {
     if (!categoryId) return null
     return categoryMap.value.get(categoryId) || null
   }
-
-  const memberMap = computed(() => {
-    return new Map(memberStore.members.map((m) => [m.id, m]))
-  })
 
   function getMemberName(memberId?: string | null): string {
     if (!memberId) return 'Onbekend'
@@ -88,17 +88,16 @@
       </UDashboardNavbar>
 
       <UDashboardToolbar>
-        <template #right>
+        <template v-if="!memberStore.isCurrentUserViewer" #right>
           <UButton icon="i-lucide-settings" variant="soft" color="neutral" title="Reisinstellingen & Afronden"
             @click="isUpdateTripOpen = true" />
           <UButton icon="i-lucide-tags" variant="soft" color="neutral" title="Categorieën beheren"
             @click="isCategoriesOpen = true" />
-          <!-- Verrekenen knop opent nu direct de modal -->
           <UButton icon="i-lucide-arrow-right-left" variant="soft" color="neutral" title="Verrekenen"
             @click="isSettlementOpen = true" />
           <UButton icon="i-lucide-users" variant="soft" color="neutral" title="Deelnemers beheren"
             @click="isViewMembersOpen = true" />
-          <UButton icon="i-lucide-gift" label="Gift" color="neutral" variant="soft" title="Gift of inkomst toevoegen"
+          <UButton icon="i-lucide-gift" variant="soft" color="neutral" title="Gift of inkomst toevoegen"
             @click="isCreateGiftOpen = true" />
           <UButton icon="i-lucide-plus" label="Uitgave" color="primary" @click="isCreateExpenseOpen = true" />
         </template>
@@ -116,14 +115,15 @@
               </div>
             </div>
 
-            <!-- Alleen tonen als er een budget is ingesteld -->
             <div v-if="hasBudget" class="budget-card">
               <div class="budget-card__header">
                 <span>Budget voortgang</span>
-                <span>{{ formatCurrency(expenseStore.totalSpent, trip?.currency) }} / {{ formatCurrency(trip?.budget,
-                  trip?.currency) }}</span>
+                <span>
+                  {{ formatCurrency(expenseStore.totalSpent, trip?.currency) }} /
+                  {{ formatCurrency(trip?.budget, trip?.currency) }}
+                </span>
               </div>
-              <UProgress :value="budgetPercentage" />
+              <UProgress :model-value="budgetPercentage" />
             </div>
           </div>
 
@@ -140,8 +140,8 @@
 
         <!-- Lege Staat -->
         <UEmpty v-else-if="expenseStore.expenses.length === 0" icon="i-lucide-wallet" title="Nog geen uitgaven"
-          description="Tik op de knop om de eerste aankoop of gift vast te leggen." class="py-12">
-          <template #actions>
+          description="Tik op de knop om de eerste aankoop of gift vast te leggen.">
+          <template #actions v-if="!memberStore.isCurrentUserViewer">
             <UButton icon="i-lucide-plus" label="Eerste uitgave toevoegen" @click="isCreateExpenseOpen = true" />
           </template>
         </UEmpty>
@@ -158,26 +158,26 @@
               <div v-for="item in group.items" :key="item.id" class="expense-row" @click="handleView(item)">
                 <div class="expense-row__left">
                   <div class="expense-row__icon-wrap" :class="{ 'expense-row__icon-wrap--income': item.is_income }"
-                    :style="!item.is_income && getCategory(item.category_id)?.color ? {
-                      backgroundColor: `${getCategory(item.category_id)?.color}15`,
-                      color: getCategory(item.category_id)?.color
+                    :style="!item.is_income && getCategory(item.category)?.color ? {
+                      backgroundColor: `${getCategory(item.category)?.color}15`,
+                      color: getCategory(item.category)?.color
                     } : {}">
                     <UIcon
-                      :name="item.is_income ? 'i-lucide-gift' : (getCategory(item.category_id)?.icon || 'i-lucide-receipt')"
+                      :name="item.is_income ? 'i-lucide-gift' : (getCategory(item.category)?.icon || 'i-lucide-receipt')"
                       class="expense-row__icon" />
                   </div>
 
                   <div class="expense-row__meta">
                     <span class="expense-row__title">{{ item.title }}</span>
                     <span class="expense-row__sub">
-                      <template v-if="(item as any).paid_from_pot">
+                      <template v-if="item.paid_from_pot">
                         Betaald via <strong>Gezamenlijke pot</strong>
                       </template>
                       <template v-else>
-                        Betaald door <strong>{{ getMemberName(item.paid_by_member_id) }}</strong>
+                        Betaald door <strong>{{ getMemberName(item.paid_by) }}</strong>
                       </template>
-                      <template v-if="!item.is_income && getCategory(item.category_id)">
-                        • {{ getCategory(item.category_id)?.name }}
+                      <template v-if="!item.is_income && getCategory(item.category)">
+                        • {{ getCategory(item.category)?.name }}
                       </template>
                     </span>
                   </div>
@@ -185,7 +185,7 @@
 
                 <div class="expense-row__right">
                   <div class="expense-row__indicators">
-                    <UIcon v-if="item.receipt_path" name="i-lucide-paperclip"
+                    <UIcon v-if="item.receipt" name="i-lucide-paperclip"
                       class="expense-row__indicator-icon expense-row__indicator-icon--primary" />
                     <UIcon v-if="item.notes" name="i-lucide-message-square" class="expense-row__indicator-icon" />
                   </div>
@@ -202,18 +202,21 @@
       </div>
     </template>
   </UDashboardPanel>
+
   <!-- Modals -->
-  <TripCategoriesModal v-model:open="isCategoriesOpen" :trip-id="tripId" :trip-name="trip?.name" />
-  <TripMembersModal v-model:open="isViewMembersOpen" :trip-id="tripId" :trip-name="trip?.name" />
+  <CategoryModalView v-model:open="isCategoriesOpen" :trip-id="tripId" :trip-name="trip?.name" />
+  <MemberModalView v-model:open="isViewMembersOpen" v-if="trip" :trip="trip" />
   <TripModalUpdate v-model:open="isUpdateTripOpen" :trip="trip" />
   <TripModalSettlement v-model:open="isSettlementOpen" :trip="trip" />
+
   <ExpenseModalCreate v-model:open="isCreateExpenseOpen" :trip-id="tripId" :currency="trip?.currency" />
   <ExpenseModalView v-model:open="isViewExpenseOpen" :expense="selectedExpense" :currency="trip?.currency"
     @edit="handleEdit" @delete="handleDelete" />
   <ExpenseModalUpdate v-model:open="isUpdateExpenseOpen" :expense="selectedExpense" :trip-id="tripId"
     :currency="trip?.currency" />
-  <ExpenseModalGiftCreate v-model:open="isCreateGiftOpen" :trip-id="tripId" :currency="trip?.currency" />
   <ExpenseModalDelete v-model:open="isDeleteExpenseOpen" :expense="selectedExpense" :currency="trip?.currency" />
+
+  <ExpenseModalGiftCreate v-model:open="isCreateGiftOpen" :trip-id="tripId" :currency="trip?.currency" />
 </template>
 
 <style lang="scss" scoped>
@@ -244,6 +247,7 @@
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
+      gap: 1rem;
     }
 
     &__label {
@@ -259,12 +263,6 @@
       color: var(--ui-text);
     }
 
-    &__remaining {
-      font-size: 1.25rem;
-      font-weight: 600;
-      color: var(--color-neutral);
-    }
-
     &__income-badge {
       margin-top: 0.5rem;
       display: flex;
@@ -272,6 +270,21 @@
       gap: 0.375rem;
       font-size: 0.75rem;
       color: var(--ui-text-muted);
+    }
+  }
+
+  .budget-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    min-width: 180px;
+
+    &__header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--ui-text-muted);
+      gap: 0.5rem;
     }
   }
 
@@ -372,6 +385,9 @@
     &__sub {
       font-size: 0.75rem;
       color: var(--ui-text-muted, #6b7280);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     &__right {

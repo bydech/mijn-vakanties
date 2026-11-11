@@ -1,0 +1,20 @@
+.auth-layout {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+
+  &__card {
+    width: 100%;
+    max-width: 28rem;
+  }
+
+  &__link {
+    color: var(--ui-primary);
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
