@@ -1,27 +1,30 @@
-# Nuxt dev/build outputs
-.output
-.data
-.nuxt
-.nitro
-.cache
-dist
+# Nuxt dev/build outputs (geldt automatisch ook in /code)
+.output/
+.data/
+.nuxt/
+.nitro/
+.cache/
+dist/
 
 # Node dependencies
-node_modules
+node_modules/
 
 # Logs
-logs
+logs/
 *.log
 
-# Misc
+# Misc / IDE
 .DS_Store
-.fleet
-.idea
+.fleet/
+.idea/
 
 # Local env files
 .env
 .env.*
 !.env.example
 
-
-supabase/.temp/
+# PocketBase (NOOIT database of binary committen, WEL migraties)
+pocketbase/pb_data/
+pocketbase/pocketbase.exe
+pocketbase/pocketbase
+!pocketbase/pb_migrations/

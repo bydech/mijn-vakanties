@@ -25,7 +25,11 @@ export default defineNuxtConfig({
       ],
     },
   },
-
+  runtimeConfig: {
+    public: {
+      pocketbaseUrl: "http://127.0.0.1:8092",
+    },
+  },
   pwa: {
     registerType: "autoUpdate",
     manifest: {
