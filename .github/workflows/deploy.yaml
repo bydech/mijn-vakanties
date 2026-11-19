@@ -1,0 +1,49 @@
+name: Deploy Mijn Vakanties to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout code
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: code/package-lock.json
+
+      - name: 3. Install dependencies & build static Nuxt app
+        working-directory: code
+        env:
+          NUXT_PUBLIC_POCKETBASE_URL: ${{ secrets.NUXT_PUBLIC_POCKETBASE_URL }}
+        run: |
+          npm ci
+          npm run generate
+
+      - name: 4. Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 5. Sync Frontend & Migrations to VPS
+        run: |
+          rsync -avz --delete code/.output/public/ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vakanties/dist/
+
+          if [ -d "pocketbase/pb_migrations" ]; then
+            rsync -avz --delete pocketbase/pb_migrations/ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/var/www/vakanties/pb/pb_migrations/
+          fi
+
+      - name: 6. Restart PocketBase service
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "sudo /bin/systemctl restart pb-vakanties"
