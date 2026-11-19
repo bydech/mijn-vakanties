@@ -76,7 +76,7 @@
         description="Log in om je reizen en uitgaven te bekijken." icon="i-lucide-parasol" @submit="onSubmit">
         <template #footer>
           <div class="auth-layout__footer">
-            Nog geen account?
+            Nog geen account? hello world
             <NuxtLink to="/register" class="auth-layout__link">
               Account aanmaken
             </NuxtLink>
