@@ -2,6 +2,13 @@
 migrate((app) => {
   const collection = app.findCollectionByNameOrId("trips_collection")
 
+  // remove field
+  collection.fields.removeById("text2147926666")
+
+  return app.save(collection)
+}, (app) => {
+  const collection = app.findCollectionByNameOrId("trips_collection")
+
   // add field
   collection.fields.addAt(10, new Field({
     "autogeneratePattern": "",
@@ -18,13 +25,6 @@ migrate((app) => {
     "system": false,
     "type": "text"
   }))
-
-  return app.save(collection)
-}, (app) => {
-  const collection = app.findCollectionByNameOrId("trips_collection")
-
-  // remove field
-  collection.fields.removeById("text2147926666")
 
   return app.save(collection)
 })
